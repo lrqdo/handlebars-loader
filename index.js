@@ -1,3 +1,5 @@
+'use strict';
+
 var loaderUtils = require("loader-utils");
 var handlebars = require("handlebars");
 var async = require("async");
@@ -24,13 +26,12 @@ module.exports = function(source) {
 	var extensions = query.extensions;
 	if (!extensions) {
 		extensions = [".handlebars", ".hbs", ""];
-	}
-	else if (!Array.isArray(extensions)) {
+	} else if (!Array.isArray(extensions)) {
 		extensions = extensions.split(/[ ,;]/g);
 	}
 
-	var rootRelative = query.rootRelative;
-	if (rootRelative == null) {
+	var rootRelative = query.rootRelative || null;
+	if (rootRelative === null) {
 		rootRelative = "./";
 	}
 
@@ -44,10 +45,13 @@ module.exports = function(source) {
 		inlineRequires = new RegExp(inlineRequires);
 	}
 
-	var debug = false;
+	var debug = !!query.debug || false;
+
+	var looseMode = query.loose || false;
 
 	var hb = handlebars.create();
 	var JavaScriptCompiler = hb.JavaScriptCompiler;
+
 	function MyJavaScriptCompiler() {
 		JavaScriptCompiler.apply(this, arguments);
 	}
@@ -63,20 +67,17 @@ module.exports = function(source) {
 			}
 			foundPartials["$" + name] = null;
 			return JavaScriptCompiler.prototype.nameLookup.apply(this, arguments);
-		}
-		else if (type === "helper") {
+		} else if (type === "helper") {
 			if (foundHelpers["$" + name]) {
 				return "require(" + JSON.stringify(foundHelpers["$" + name]) + ")";
 			}
 			foundHelpers["$" + name] = null;
 			return JavaScriptCompiler.prototype.nameLookup.apply(this, arguments);
-		}
-		else if (type === "context") {
+		} else if (type === "context") {
 			// This could be a helper too, save it to check it later
 			if (!foundUnclearStuff["$" + name]) foundUnclearStuff["$" + name] = false;
 			return JavaScriptCompiler.prototype.nameLookup.apply(this, arguments);
-		}
-		else {
+		} else {
 			return JavaScriptCompiler.prototype.nameLookup.apply(this, arguments);
 		}
 	};
@@ -89,11 +90,11 @@ module.exports = function(source) {
 				JavaScriptCompiler.prototype.pushString.call(this, value);
 			}
 		};
-		MyJavaScriptCompiler.prototype.appendToBuffer = function (str) {
+		MyJavaScriptCompiler.prototype.appendToBuffer = function(str) {
 			// This is a template (stringified HTML) chunk
 			if (str.indexOf('"') === 0) {
 				var replacements = findNestedRequires(str, inlineRequires);
-				str = fastreplace(str, replacements, function (match) {
+				str = fastreplace(str, replacements, function(match) {
 					return "\" + require(" + JSON.stringify(match) + ") + \"";
 				});
 			}
@@ -131,7 +132,7 @@ module.exports = function(source) {
 
 		try {
 			template = hb.precompile(source, {
-				knownHelpersOnly: firstCompile ? false : true,
+				knownHelpersOnly: looseMode ? false : firstCompile ? false : true,
 				knownHelpers: knownHelpers
 			});
 		} catch (err) {
@@ -160,11 +161,9 @@ module.exports = function(source) {
 					if (!err && result) {
 						if (debug) console.log("Resolved %s %s", type, traceMsg);
 						return callback(err, result);
-					}
-					else if (contexts.length > 0) {
+					} else if (contexts.length > 0) {
 						resolveWithContexts();
-					}
-					else {
+					} else {
 						if (debug) console.log("Failed to resolve %s %s", type, traceMsg);
 						return callback(err, result);
 					}
@@ -241,8 +240,8 @@ module.exports = function(source) {
 			}
 
 			// export as module
-			loaderAsyncCallback(null, 'var Handlebars = require(' + JSON.stringify(runtimePath) + ');\n'
-				+ 'module.exports = (Handlebars["default"] || Handlebars).template(' + template + ');');
+			loaderAsyncCallback(null, 'var Handlebars = require(' + JSON.stringify(runtimePath) + ');\n' +
+				'module.exports = Handlebars.template(' + template + ');');
 		};
 
 		var resolvePartials = function(err) {
